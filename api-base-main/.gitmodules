@@ -1,0 +1,6 @@
+[submodule "app/common"]
+	path = app/common
+	url = https://github.com/ixevcorp/api-common.git
+[submodule "common"]
+	path = common
+	url = https://github.com/ixevcorp/api-common.git

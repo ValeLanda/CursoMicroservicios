@@ -1,0 +1,21 @@
+name: Sonarqube process
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
+      types: [opened, synchronize, reopened]
+jobs:
+  sonarqube:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@master
+    - name: SonarQube Scan
+      uses: kitabisa/sonarqube-action@v1.1.0
+      with:
+        host: "http://34.117.232.240/"
+        login: ${{ secrets.SONARQUBE_TOKEN }}
+        projectBaseDir: "./app"
+        projectKey: "apimovil-sonarqube"
+        projectName: "apimovil"

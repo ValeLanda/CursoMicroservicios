@@ -1,0 +1,115 @@
+steps:
+#Obtener la llave para conectarse a github
+- name: 'gcr.io/cloud-builders/git'
+  id: Configurar Git
+  secretEnv: ['SSH_KEY', 'SSH_KEY_GITOPS']
+  entrypoint: 'bash'
+  args:
+  - -c
+  - |
+    echo "$$SSH_KEY" >> /root/.ssh/id_rsa_normal
+    chmod 400 /root/.ssh/id_rsa_normal
+    echo "$$SSH_KEY_GITOPS" >> /root/.ssh/id_rsa_gitops
+    chmod 400 /root/.ssh/id_rsa_gitops
+    cat > /root/.ssh/config << EOL
+    Host github.com
+      # Specify the real host name
+      HostName    = github.com
+      User        = git
+      IdentityFile    = /root/.ssh/id_rsa_normal
+    Host git-ops.github.com
+      # Specify the real host name
+      HostName    = github.com
+      User        = git
+      IdentityFile    = /root/.ssh/id_rsa_gitops
+    EOL
+    cp known_hosts.github /root/.ssh/known_hosts
+  volumes:
+  - name: 'ssh'
+    path: /root/.ssh
+
+#Actualizar los submodulos y cambiar la llave para GitOps
+- name: 'gcr.io/cloud-builders/git'
+  id: Actualizar submodulos
+  entrypoint: 'bash'
+  args:
+   - '-c'
+   - |
+      set -x
+      sed -i 's/https:\/\/github.com\//git@github.com:/' .gitmodules
+      git submodule init
+      git submodule update
+  volumes:
+  - name: 'ssh'
+    path: /root/.ssh
+
+# Crear la imagen contenedorizada
+- name: 'gcr.io/cloud-builders/docker'
+  id: Build
+  args:
+  - 'build'
+  - '-t'
+  - 'gcr.io/$PROJECT_ID/${_IMAGE_NAME}:$SHORT_SHA'
+  - '.'
+
+# Subir la imagen al registry
+- name: 'gcr.io/cloud-builders/docker'
+  id: Push
+  args:
+  - 'push'
+  - 'gcr.io/$PROJECT_ID/${_IMAGE_NAME}:$SHORT_SHA'
+
+- name: 'gcr.io/cloud-builders/git'
+  id: Clonar GitOps
+  entrypoint: 'bash'
+  args:
+   - '-c'
+   - |
+      set -x
+      cat /root/.ssh/config
+      git clone git@git-ops.github.com:ixevcorp/gitops-env.git
+  volumes:
+  - name: 'ssh'
+    path: /root/.ssh
+
+# Copia el nuevo manifiesto hacia base
+- name: 'gcr.io/cloud-builders/gcloud'
+  id: Copiar manifest
+  entrypoint: /bin/sh
+  args:
+  - '-c'
+  - |
+    set -x
+    mkdir -p /workspace/gitops-env/apps/${_REPO_NAME}/base
+    \cp deployment.yaml /workspace/gitops-env/apps/${_REPO_NAME}/base/deployment.yaml
+    cd /workspace/gitops-env/apps/${_REPO_NAME}/
+    git config --global user.email $(git log --format='%ae' -n 1 HEAD)
+    git config --global user.name $(git log --format='%an' -n 1 HEAD)
+    git add -A
+    git commit -m "Actualizando deployment del repositorio ${_REPO_NAME} Author: $(git log --format='%an <%ae>' -n 1 HEAD)"/
+    git push 'git@git-ops.github.com:ixevcorp/gitops-env.git' master
+  volumes:
+  - name: 'ssh'
+    path: /root/.ssh
+
+# Subscribirse y enviar un mensaje
+- name: 'gcr.io/cloud-builders/gcloud'
+  id: Notificar pubsub
+  entrypoint: /bin/sh
+  args:
+  - '-c'
+  - |
+    gcloud pubsub topics publish dev-build --message "Iniciando despliegue" \
+    --attribute=repo=${_REPO_NAME},imagename=${_IMAGE_NAME},tag=$SHORT_SHA
+
+substitutions:
+    _IMAGE_NAME: api-base
+    _REPO_NAME: api-base
+options:
+    substitution_option: 'ALLOW_LOOSE'
+availableSecrets:
+  secretManager:
+  - versionName: projects/$PROJECT_ID/secrets/apimovil-common-secret/versions/latest
+    env: 'SSH_KEY'
+  - versionName: projects/$PROJECT_ID/secrets/gitops-env-secret/versions/latest
+    env: 'SSH_KEY_GITOPS'

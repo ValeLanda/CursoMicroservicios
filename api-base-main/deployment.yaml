@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-base
+spec:
+  replicas: 1
+  strategy:
+      type: RollingUpdate
+      rollingUpdate:
+        maxSurge: 2        # how many pods we can add at a time
+        maxUnavailable: 0  # maxUnavailable define how many pods can be unavailable
+                           # during the rolling update
+  selector:
+    matchLabels:
+      app: api-base
+  template:
+    metadata:
+      labels:
+        app: api-base
+        group: apimovil
+    spec:
+      containers:
+      - name: api-base
+        image: REPLACE_IMAGE_WITH_TAG 
+        imagePullPolicy: IfNotPresent
+        resources:
+          requests:
+            memory: "100Mi"
+          limits:
+            memory: "380Mi"
+        ports:
+        - containerPort: 80
+        env:
+        - name: DB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: db-config
+              key: db-host
+        - name: DB_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: db-config
+              key: db-port
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: db-secrets
+              key: db-username
+        - name: DB_PSWD
+          valueFrom:
+            secretKeyRef:
+              name: db-secrets
+              key: db-password
+        - name: DB_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: db-config
+              key: db-name
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: security
+              key: api-secret
+        - name: LOGGING_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: db-config
+              key: logging-level
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-base-service
+spec:
+  ports:
+    - protocol: TCP
+      port: 80          # Puerto en el cluster
+      targetPort: 80    # Puerto del contenedor
+  selector:
+    app: api-base
+  type: LoadBalancer
